@@ -3,6 +3,7 @@ CHSI score query module: queries master's entrance exam scores.
 Requires an authenticated session from login.py.
 """
 
+import json
 import os
 import re
 from requests import Session
@@ -11,17 +12,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 QUERY_URL = "https://yz.chsi.com.cn/apply/cjcx/cjcx.do"
-
-QUERY_HEADERS = {
-    "Content-Type": "application/x-www-form-urlencoded",
-    "Origin": "https://yz.chsi.com.cn",
-    "Referer": "https://yz.chsi.com.cn/apply/cjcx/t/{bkdwdm}.dhtml",
-    "Upgrade-Insecure-Requests": "1",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "same-origin",
-    "Sec-Fetch-User": "?1",
-}
 
 
 def query_score(session: Session) -> str:
@@ -39,6 +29,11 @@ def query_score(session: Session) -> str:
     ksbh = os.environ["QUERY_KSBH"]
     bkdwdm = os.environ["QUERY_BKDWDM"]
 
+    referer = f"https://yz.chsi.com.cn/apply/cjcx/t/{bkdwdm}.dhtml"
+
+    # Visit the entry page first so the server recognises the navigation flow
+    session.get(referer, timeout=15)
+
     payload = {
         "xm": xm,
         "zjhm": zjhm,
@@ -47,32 +42,43 @@ def query_score(session: Session) -> str:
         "checkcode": "",
     }
 
-    headers = dict(QUERY_HEADERS)
-    headers["Referer"] = headers["Referer"].format(bkdwdm=bkdwdm)
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Origin": "https://yz.chsi.com.cn",
+        "Referer": referer,
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-User": "?1",
+    }
 
-    resp = session.post(QUERY_URL, data=payload, headers=headers, allow_redirects=True)
+    resp = session.post(QUERY_URL, data=payload, headers=headers, allow_redirects=True, timeout=15)
     resp.raise_for_status()
     return resp.text
 
 
-def parse_score(html: str) -> dict:
+def parse_score(html: str) -> tuple[dict, str]:
     """
     Parses score information from the query result HTML.
-    Returns a dict with available score fields, or raises RuntimeError if not found.
+    Returns (cj_dict, notice_str). Raises RuntimeError if scores unavailable.
     """
-    # Check for "scores not released yet" message
-    if "成绩未公布" in html or "暂无成绩" in html:
-        raise RuntimeError("成绩尚未公布")
+    # Extract the Vue `cj` data object from the inline script
+    cj_match = re.search(r'\bcj\s*:\s*(\{.*?\}|null)', html, re.DOTALL)
+    if not cj_match:
+        raise RuntimeError("无法解析成绩数据")
 
-    scores = {}
+    raw = cj_match.group(1).strip()
+    if raw == "null":
+        msg_match = re.search(r'\bmsg\s*:\s*["\']([^"\']*)["\']', html)
+        msg = msg_match.group(1) if msg_match else "请检查报考信息或成绩查询尚未开放"
+        raise RuntimeError(f"无查询结果：{msg}")
 
-    # Extract score table rows
-    rows = re.findall(r'<td[^>]*>(.*?)</td>', html, re.DOTALL)
-    cleaned = [re.sub(r'<[^>]+>', '', cell).strip() for cell in rows]
+    try:
+        cj = json.loads(raw)
+    except json.JSONDecodeError:
+        raise RuntimeError(f"成绩数据解析失败: {raw[:200]}")
 
-    # Try to find total score and subject scores
-    total_match = re.search(r'总\s*分[：:]\s*(\d+(?:\.\d+)?)', html)
-    if total_match:
-        scores["总分"] = total_match.group(1)
+    notice = cj.pop("zsdwsm", "") or ""
+    return cj, notice
 
-    return scores if scores else {"raw_cells": cleaned}

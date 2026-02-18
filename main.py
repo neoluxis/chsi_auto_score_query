@@ -1,9 +1,10 @@
 """
-Entry point: logs in to CHSI and queries master's entrance exam score.
+Entry point: logs in to CHSI, queries master's entrance exam score, and sends email.
 """
 
 from login import login
 from query import query_score, parse_score
+from notify import send_score_email
 
 
 def main():
@@ -13,8 +14,11 @@ def main():
 
     print("Querying score...")
     html = query_score(session)
-    result = parse_score(html)
-    print("Score result:", result)
+    cj, notice = parse_score(html)
+    print("Score:", {k: cj[k] for k in ("xm", "zf") if k in cj})
+
+    print("Sending email...")
+    send_score_email(cj, notice)
 
 
 if __name__ == "__main__":

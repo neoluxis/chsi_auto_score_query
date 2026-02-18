@@ -7,6 +7,7 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from dotenv import load_dotenv
+from proxy import smtp_ssl
 
 load_dotenv()
 
@@ -81,7 +82,7 @@ def send_score_email(cj: dict, notice: str = "") -> None:
 
     msg.attach(MIMEText(build_html(cj, notice), "html", "utf-8"))
 
-    with smtplib.SMTP_SSL(smtp_server, smtp_port) as smtp:
+    with smtp_ssl(smtp_server, smtp_port) as smtp:
         smtp.login(sender, auth_code)
         smtp.sendmail(sender, receiver, msg.as_string())
 

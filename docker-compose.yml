@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  # 后端API服务
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: chsi-backend
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      LOG_LEVEL: "info"
+      CHSI_USERNAME: ${CHSI_USERNAME:-}
+      CHSI_PASSWORD: ${CHSI_PASSWORD:-}
+      SMTP_SERVER: ${SMTP_SERVER:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      DATABASE_DSN: "/app/data/chsi.db"
+      QUERY_INTERVAL: ${QUERY_INTERVAL:-3600}
+      CLEAR_DB_ON_START: ${CLEAR_DB_ON_START:-false}
+    volumes:
+      - ./backend/data:/app/data
+      - ./backend/.env:/app/.env:ro
+    depends_on:
+      - data
+    networks:
+      - chsi-network
+    restart: unless-stopped
+
+  # 前端服务
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: chsi-frontend
+    ports:
+      - "3000:5173"
+    environment:
+      VITE_API_BASE_URL: "http://localhost:8080"
+    depends_on:
+      - backend
+    networks:
+      - chsi-network
+    restart: unless-stopped
+
+  # 数据卷服务
+  data:
+    image: alpine
+    container_name: chsi-data
+    volumes:
+      - chsi-db:/data
+    command: sh -c "mkdir -p /data && chmod 777 /data"
+
+networks:
+  chsi-network:
+    driver: bridge
+
+volumes:
+  chsi-db:
+    driver: local

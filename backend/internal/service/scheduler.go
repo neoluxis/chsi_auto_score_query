@@ -1,12 +1,13 @@
 package service
 
 import (
-"time"
+	"time"
 
-"chsi-auto-score-query/internal/logger"
-"chsi-auto-score-query/internal/repo"
-"chsi-auto-score-query/pkg/config"
-"gorm.io/gorm"
+	"chsi-auto-score-query/internal/logger"
+	"chsi-auto-score-query/internal/repo"
+	"chsi-auto-score-query/pkg/config"
+
+	"gorm.io/gorm"
 )
 
 type Scheduler struct {
@@ -70,7 +71,7 @@ func (s *Scheduler) Stop() {
 
 // queryPendingUsers queries scores for all pending users
 func (s *Scheduler) queryPendingUsers() {
-	logger.Info("Starting background score query batch")
+	logger.Info("=== Starting background score query batch ===")
 
 	// Get all users with pending scores
 	users, err := s.userRepo.FindPending()
@@ -80,31 +81,42 @@ func (s *Scheduler) queryPendingUsers() {
 	}
 
 	if len(users) == 0 {
-		logger.Debug("No pending users found")
+		logger.Debug("No pending users to query")
 		return
 	}
 
-	logger.Info("Found %d pending users to query", len(users))
+	logger.Info("Found %d pending user(s) to process", len(users))
+
+	successCount := 0
+	failureCount := 0
 
 	// Query score for each user
-	for _, user := range users {
-		logger.Info("Processing user: %s (%s)", user.Name, user.Email)
+	for i, user := range users {
+		logger.Info("[%d/%d] Processing user: %s (%s)", i+1, len(users), user.Name, user.Email)
 
 		// Query and email result
 		if err := s.queryService.QueryAndEmail(&user); err != nil {
-			logger.Error("Failed to process user %s: %v", user.Email, err)
+			failureCount++
+			logger.Error("     ❌ Query result: Failed - %v", err)
 			// Update notice field with error message
 			user.Notice = "查询失败：" + err.Error()
 		} else {
-			// Mark user as queried by setting CurrentTime
+			successCount++
+			// Mark user as queried by setting LastQueryAt
 			user.LastQueryAt = time.Now()
+			if user.Score != "" {
+				logger.Info("     ✅ Query result: Score found and email sent")
+			} else {
+				logger.Info("     ⏳ Query result: Score not yet available or pending")
+			}
 		}
 
 		// Update user record
 		if err := s.userRepo.Update(&user); err != nil {
-			logger.Error("Failed to update user %s: %v", user.Email, err)
+			logger.Error("     ⚠️  Failed to update user record: %v", err)
 		}
 	}
 
-	logger.Info("Background score query batch completed")
+	logger.Info("=== Background score query batch completed [Success: %d, Failed: %d, Total: %d] ===",
+		successCount, failureCount, len(users))
 }

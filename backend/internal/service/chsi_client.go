@@ -2,10 +2,13 @@ package service
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"regexp"
 	"time"
 
 	"chsi-auto-score-query/internal/logger"
@@ -130,34 +133,150 @@ func (c *ChsiClient) QueryScore(user *model.User) (string, error) {
 	return htmlContent, nil
 }
 
-// ParseScore parses score from HTML response
+// ParseScore parses score from HTML response using Vue's cj JSON object
 func (c *ChsiClient) ParseScore(htmlContent string) (string, error) {
 	logger.Info("Parsing score from HTML response")
 
-	// 简单的HTML解析：查找是否包含成绩信息
-	// 在实际应用中应该使用HTML解析库如goquery
 	if htmlContent == "" {
-		logger.Error("Empty HTML content")
+		logger.Warn("Score query status: Empty HTML response - possible network error or invalid session")
 		return "", nil
 	}
 
-	// 检查常见的成功标记
-	if bytes.Contains([]byte(htmlContent), []byte("总分")) ||
-		bytes.Contains([]byte(htmlContent), []byte("Score")) ||
-		bytes.Contains([]byte(htmlContent), []byte("分数")) {
-		logger.Info("Score information found in response")
-		// TODO: 实现详细的成绩解析
-		return "score_found", nil
+	html := string(htmlContent)
+
+	// Step 1: Extract Vue's cj object using improved regex
+	// Try pattern 1: cj : {...}
+	re := regexp.MustCompile(`(?s)\bcj\s*:\s*(\{[^}]*\}|null)`)
+	matches := re.FindStringSubmatch(html)
+
+	var raw string
+	if len(matches) >= 2 {
+		raw = matches[1]
 	}
 
-	// 检查常见的失败标记
-	if bytes.Contains([]byte(htmlContent), []byte("暂未发布")) ||
-		bytes.Contains([]byte(htmlContent), []byte("未查询到")) ||
-		bytes.Contains([]byte(htmlContent), []byte("信息不匹配")) {
-		logger.Warn("Score not available yet or information mismatch")
+	// If simple pattern failed, try more complex pattern for nested objects
+	if raw == "" {
+		re = regexp.MustCompile(`(?s)\bcj\s*:\s*(\{(?:[^{}]|(?:\{[^{}]*\}))*\}|null)`)
+		matches = re.FindStringSubmatch(html)
+		if len(matches) >= 2 {
+			raw = matches[1]
+		}
+	}
+
+	// Last resort: look for quotes around cj
+	if raw == "" {
+		re = regexp.MustCompile(`(?s)"cj"\s*:\s*(\{[^{}]*\}|null)`)
+		matches = re.FindStringSubmatch(html)
+		if len(matches) >= 2 {
+			raw = matches[1]
+		}
+	}
+
+	if raw == "" {
+		logger.Warn("Score query status: Could not find score data structure in response")
 		return "", nil
 	}
 
-	logger.Info("Unable to determine score status from HTML")
+	logger.Debug("Extracted raw cj data: %s", raw[:minInt(100, len(raw))])
+
+	// Step 2: Check if cj is null
+	if raw == "null" {
+		// Extract msg field if available
+		msgRe := regexp.MustCompile(`(?s)\bmsg\s*[:=]\s*["']([^"']*)["']`)
+		msgMatches := msgRe.FindStringSubmatch(html)
+		msg := "请检查报考信息或成绩查询尚未开放"
+		if len(msgMatches) > 1 {
+			msg = msgMatches[1]
+		}
+
+		logger.Warn("Score query status: ⏳ No query result available - msg: %s", msg)
+
+		// Categorize the message to provide more specific status
+		if bytes.Contains([]byte(msg), []byte("信息不匹配")) {
+			logger.Warn("  └─ Detailed: 信息不匹配 (User information doesn't match CHSI records)")
+			return "", nil
+		}
+
+		if bytes.Contains([]byte(msg), []byte("暂未")) || bytes.Contains([]byte(msg), []byte("未开放")) {
+			logger.Info("  └─ Status: Scores not yet published")
+			return "", nil
+		}
+
+		return "", nil
+	}
+
+	// Step 3: Parse cj as JSON
+	var scoreData map[string]interface{}
+	if err := json.Unmarshal([]byte(raw), &scoreData); err != nil {
+		logger.Error("Score query status: Failed to parse score data as JSON: %v", err)
+		logger.Debug("Raw data was: %s", raw[:minInt(200, len(raw))])
+		return "", err
+	}
+
+	logger.Debug("Successfully parsed score JSON with %d fields", len(scoreData))
+
+	// Step 4: Extract score information
+	// Build score string from available fields
+	var scoreStr string
+
+	// Common score fields based on CHSI structure
+	scoreFields := []string{"总分", "zf", "total_score", "zsxh", "ksbh", "xm", "zymc"}
+	for _, field := range scoreFields {
+		if val, ok := scoreData[field]; ok && val != "" && val != nil {
+			scoreStr += fmt.Sprintf("%s: %v; ", field, val)
+		}
+	}
+
+	if scoreStr != "" {
+		logger.Info("Score query status: ✅ Score found - %s", scoreStr)
+		return scoreStr, nil
+	}
+
+	// Check for admission status fields
+	admissionFields := []string{"lqzt", "录取状态", "psyz", "拟录取"}
+	for _, field := range admissionFields {
+		if val, ok := scoreData[field]; ok && val != "" && val != nil {
+			valStr := fmt.Sprintf("%v", val)
+			if bytes.Contains([]byte(valStr), []byte("录取")) {
+				logger.Info("Score query status: ✅ Admission status found - %s: %v", field, val)
+				return valStr, nil
+			}
+			if bytes.Contains([]byte(valStr), []byte("体检")) {
+				logger.Info("Score query status: 📋 Physical exam stage - %s: %v", field, val)
+				return "", nil
+			}
+			if bytes.Contains([]byte(valStr), []byte("复试")) {
+				logger.Info("Score query status: 📝 Reexamination/interview stage - %s: %v", field, val)
+				return "", nil
+			}
+		}
+	}
+
+	// Check for preliminary score
+	preliminaryFields := []string{"cxsj", "初试成绩", "cs_cj"}
+	for _, field := range preliminaryFields {
+		if val, ok := scoreData[field]; ok && val != "" && val != nil {
+			logger.Info("Score query status: 📊 Preliminary score - %s: %v", field, val)
+			return fmt.Sprintf("%v", val), nil
+		}
+	}
+
+	// Check for zsdwsm (招生单位说明 - admission office note)
+	if note, ok := scoreData["zsdwsm"]; ok && note != "" && note != nil {
+		logger.Info("Score query status: 📌 Admission office note: %v", note)
+	}
+
+	// Unknown status - log all fields for debugging
+	logger.Debug("Score query status: All score fields - %+v", scoreData)
+	logger.Info("Score query status: ℹ️  No definitive score or admission status detected yet")
+
 	return "", nil
+}
+
+// Helper function for min integer
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

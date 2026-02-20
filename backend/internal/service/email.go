@@ -1,11 +1,11 @@
 package service
 
 import (
-	"fmt"
-	"net/smtp"
+"fmt"
+"net/smtp"
 
-	"chsi-auto-score-query/internal/logger"
-	"chsi-auto-score-query/pkg/config"
+"chsi-auto-score-query/internal/logger"
+"chsi-auto-score-query/pkg/config"
 )
 
 type EmailService struct {
@@ -58,10 +58,10 @@ func (s *EmailService) sendSMTPEmail(toEmail string, subject string, body string
 
 	// Build email message
 	message := fmt.Sprintf("To: %s\r\n"+
-		"Subject: %s\r\n"+
-		"Content-Type: text/html; charset=UTF-8\r\n"+
-		"\r\n"+
-		"%s", toEmail, subject, body)
+"Subject: %s\r\n"+
+"Content-Type: text/html; charset=UTF-8\r\n"+
+"\r\n"+
+"%s", toEmail, subject, body)
 
 	// Setup SMTP server
 	host := s.cfg.SMTPServer
@@ -71,12 +71,12 @@ func (s *EmailService) sendSMTPEmail(toEmail string, subject string, body string
 	// Send email
 	logger.Debug("Sending email to %s via %s:%d", toEmail, host, s.cfg.SMTPPort)
 	err := smtp.SendMail(
-		host+port,
-		auth,
-		s.cfg.SMTPUser,
-		[]string{toEmail},
-		[]byte(message),
-	)
+host+port,
+auth,
+s.cfg.SMTPUser,
+[]string{toEmail},
+[]byte(message),
+)
 
 	if err != nil {
 		logger.Error("Failed to send email to %s: %v", toEmail, err)
@@ -84,3 +84,5 @@ func (s *EmailService) sendSMTPEmail(toEmail string, subject string, body string
 	}
 
 	logger.Info("Email sent successfully to: %s", toEmail)
+	return nil
+}

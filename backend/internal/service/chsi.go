@@ -42,18 +42,19 @@ func (s *QueryService) QueryAndEmail(user *model.User) error {
 	if err != nil {
 		logger.Error("Parse failed for user %s: %v", user.Email, err)
 		return nil // Not an error if score doesn't exist yet
-	}
+}
 
-	if score == "" {
-		logger.Info("Score not available yet for user %s", user.Email)
-		return nil
-	}
+if score == "" {
+logger.Info("Score not available yet for user %s", user.Email)
+return nil
+}
 
-	// Step 4: Send email
-	if err := s.emailSvc.SendScore(user.Email, user.Name, score); err != nil {
-		logger.Error("Email send failed for user %s: %v", user.Email, err)
-		return err
-	}
+// Step 4: Send email
+if err := s.emailSvc.SendScore(user.Email, user.Name, score); err != nil {
+logger.Error("Email send failed for user %s: %v", user.Email, err)
+return err
+}
 
-	logger.Info("Successfully completed score query and email for user: %s", user.Email)
-	return nil
+logger.Info("Successfully completed score query and email for user: %s", user.Email)
+return nil
+}

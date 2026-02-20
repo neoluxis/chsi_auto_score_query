@@ -1,16 +1,16 @@
 package service
 
 import (
-"bytes"
-"io"
-"net/http"
-"net/http/cookiejar"
-"net/url"
-"time"
+	"bytes"
+	"io"
+	"net/http"
+	"net/http/cookiejar"
+	"net/url"
+	"time"
 
-"chsi-auto-score-query/internal/logger"
-"chsi-auto-score-query/internal/model"
-"chsi-auto-score-query/pkg/config"
+	"chsi-auto-score-query/internal/logger"
+	"chsi-auto-score-query/internal/model"
+	"chsi-auto-score-query/pkg/config"
 )
 
 type ChsiClient struct {
@@ -21,7 +21,7 @@ type ChsiClient struct {
 }
 
 func NewChsiClient(cfg *config.Config) *ChsiClient {
-	jar, _ := cookiejar.New()
+	jar, _ := cookiejar.New(nil)
 	client := &http.Client{
 		Jar:     jar,
 		Timeout: 30 * time.Second,
@@ -88,11 +88,11 @@ func (c *ChsiClient) QueryScore(user *model.User) (string, error) {
 	logger.Info("Querying score for user: %s (ID: %s, ExamID: %s)", user.Name, user.IDCard, user.ExamID)
 
 	queryData := url.Values{}
-	queryData.Set("xm", user.Name)                // 姓名
-	queryData.Set("zjhm", user.IDCard)            // 身份证号
-	queryData.Set("ksbh", user.ExamID)            // 考生编号
-	queryData.Set("bkdwdm", user.SchoolCode)      // 报考单位代码
-	queryData.Set("checkcode", "")                // 验证码（模拟可以为空）
+	queryData.Set("xm", user.Name)           // 姓名
+	queryData.Set("zjhm", user.IDCard)       // 身份证号
+	queryData.Set("ksbh", user.ExamID)       // 考生编号
+	queryData.Set("bkdwdm", user.SchoolCode) // 报考单位代码
+	queryData.Set("checkcode", "")           // 验证码（模拟可以为空）
 
 	queryURL := "https://yz.chsi.com.cn/apply/cjcx/cjcx.do"
 
